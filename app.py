@@ -7,6 +7,8 @@ import os
 from flask import Flask
 from flask_cors import CORS
 from flask import request
+from firebase_admin import auth
+
 
 app = Flask(__name__)
 CORS(app)
@@ -29,6 +31,8 @@ firebaseConfig = {
 
 firebase = pyrebase.initialize_app(firebaseConfig)
 auth = firebase.auth()
+db=firebase.database()
+
 
 # Load pre-trained model
 def load_model():
@@ -157,9 +161,32 @@ def login():
     return jsonify({'success': False, 'error': 'Method not allowed'}), 405  # Method Not Allowed status code
 
 
+@app.route('/reset_password', methods=['POST'])
+def reset_password():
+    email = request.json.get('email')
+
+    if not email:
+        return jsonify({'error': 'Email address is required'}), 400
+
+    try:
+        reset_email = auth.send_password_reset_email(email)
+        return jsonify({'message': 'Password reset email sent successfully'}), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+    
 
 
+@app.route('/user_info',methods=['GET'])
+def user_info():
+    if 'user' not in session:
+        return jsonify({'error': 'User not logged in'}), 401  # Unauthorized
 
+    token = session['user']
+    try:
+        user_info = auth.get_account_info(token)
+        return jsonify({'user': user_info}), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500  # Internal Server Error
 
 @app.route('/signup', methods=['POST'])
 def signup():
@@ -170,7 +197,15 @@ def signup():
         password = data.get('password')
         if name and email and password:
             try:
-                user = auth.create_user_with_email_and_password(email, password)
+                user = auth.create_user_with_email_and_password(email, password,)
+                # Save user data to Firebase Realtime Database
+                user_data = {
+                    'name': name,
+                    'email': email
+                    # You can add more user data fields here if needed
+                }
+                db.child('users').child(user['localId']).set(user_data)
+                auth.send_email_verification(user['idToken'])
                 return jsonify({'success': True, 'message': 'User created successfully'}), 200
             except:
                 return jsonify({'success': False, 'error': 'Email already exists'}), 400
@@ -178,6 +213,7 @@ def signup():
             return jsonify({'success': False, 'error': 'Invalid data'}), 400
     else:
         return jsonify({'success': False, 'error': 'No data provided'}), 400
+
 
     
 # Style Transfer endpoint
