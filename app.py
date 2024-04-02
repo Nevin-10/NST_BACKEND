@@ -7,11 +7,14 @@ import os
 from flask import Flask
 from flask_cors import CORS
 from flask import request
-from firebase_admin import auth
+from flask_session import Session
+#from firebase_admin import auth
 
 
 app = Flask(__name__)
+Session(app)
 CORS(app)
+
 app.secret_key = os.urandom(24).hex()  # Set a secret key for session management
 
 
@@ -24,6 +27,7 @@ firebaseConfig = {
     'apiKey': "AIzaSyAhCKUMbP8GGtwkAaAEV38dKWzn6BcxS5Y",
     'authDomain': "neural-st.firebaseapp.com",
     'projectId': "neural-st",
+    'measurementId': "G-7YF88TGD3Y",
     'storageBucket': "neural-st.appspot.com",
     'messagingSenderId': "690387462569",
     'appId': "1:690387462569:web:8b5709267710c33a227cb8",
@@ -32,8 +36,9 @@ firebaseConfig = {
 firebase = pyrebase.initialize_app(firebaseConfig)
 auth = firebase.auth()
 db=firebase.database()
+storage = firebase.storage()
 
-
+global user
 # Load pre-trained model
 def load_model():
     content_layers = ['block5_conv2']
@@ -154,7 +159,11 @@ def login():
         try:
             
             user = auth.sign_in_with_email_and_password(email, password)
-            session['user'] = user['idToken']
+            session['user'] = user
+            print(user)
+            print("&&&&&")
+            print(session["user"]["localId"])
+            
             return jsonify({'success': True, 'message': 'Login successful'})
         except Exception as e:
             return jsonify({'success': False, 'error': str(e)}), 200  
@@ -219,12 +228,16 @@ def signup():
 # Style Transfer endpoint
 @app.route('/transfer_style', methods=['GET', 'POST'])
 def transfer_style():
-    if 'user' in session:
-        return redirect(url_for('transfer_style'))
+    if 'user' not in session:
+        return redirect(url_for('login'))
       
 
 
     if request.method == 'POST':
+        print("jofdojfdjjdovjdovjodjvdjnvjjjjjjjjjjjjjj")
+         
+        user_id = session["user"]["localId"]
+        print(user_id)
         content_file = request.files['content']
         style_file = request.files['style']
         epochs = int(request.form.get('epochs', 1))
@@ -243,6 +256,22 @@ def transfer_style():
 
         style_transfer(content_path, style_path, output_path, epochs, steps_per_epoch)
 
+       # Store URLs in Firebase Realtime Database
+        content_upload = storage.child('content').child(f'content_{user_id}').put(content_path)
+        content_url = storage.child('content').child(f'content_{user_id}').get_url(content_upload['downloadTokens'])
+
+        style_upload = storage.child('style').child(f'style_{user_id}').put(style_path)
+        style_url = storage.child('style').child(f'style_{user_id}').get_url(style_upload['downloadTokens'])
+
+        generated_upload = storage.child('generated').child(f'generated_{user_id}').put(output_path)
+        generated_url = storage.child('generated').child(f'generated_{user_id}').get_url(generated_upload['downloadTokens'])
+
+        # Store URLs in the database
+        db.child('users').child(user_id).child("Images").push({
+            "content": content_url,
+            "style": style_url,
+            "generated": generated_url
+        })
         return jsonify({'result': 'success', 'generated_image': output_filename})
 
 
@@ -255,3 +284,52 @@ def get_generated_image(image_name):
         return jsonify({'message': 'Image not yet generated. Please wait for the process to complete.'})
 if __name__ == '__main__':
     app.run(host='localhost', port=5000, debug=True)
+'''# Style Transfer endpoint
+@app.route('/transfer_style', methods=['POST'])
+def transfer_style():
+    if 'user' not in session:
+        return jsonify({'error': 'User not logged in'})
+
+    #user_id = session['user']['localId']
+    print(user)
+    # Upload content image
+    content_file = request.files['content']
+    content_filename = f'content.jpg'
+    content_path = os.path.join('content', content_filename)
+    content_file.save(content_path)
+
+    # Upload style image
+    style_file = request.files['style']
+    style_filename = f'style.jpg'
+    style_path = os.path.join('style', style_filename)
+    style_file.save(style_path)
+
+    # Retrieve additional parameters
+    epochs = int(request.form.get('epochs', 1))
+    steps_per_epoch = int(request.form.get('steps_per_epoch', 5))
+
+    # Perform style transfer
+    output_filename = f'generated_image.jpg'
+    output_path = os.path.join('generated', output_filename)
+    style_transfer(content_path, style_path, output_path, epochs, steps_per_epoch)
+
+    # Store URLs in Firebase Realtime Database
+    content_upload = storage.child('users').put(content_path)
+    content_url = storage.child('users').get_url(content_upload['downloadTokens'])
+
+    style_upload = storage.child('users').put(style_path)
+    style_url = storage.child('users').get_url(style_upload['downloadTokens'])
+
+    generated_upload = storage.child('users').put(output_path)
+    generated_url = storage.child('users').get_url(generated_upload['downloadTokens'])
+
+    # Store URLs in the database
+    db.child('users').child("Images").push({
+        "content": content_url,
+        "style": style_url,
+        "generated": generated_url
+    })
+
+    return jsonify({'result': 'success', 'generated_image': output_filename})
+'''
+
